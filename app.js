@@ -2,7 +2,7 @@
 
 // Proxy for MOT real-time trips + last real GPS fix per trip: server.py when run locally,
 // the Cloudflare Worker (worker/) on the hosted site
-const WORKER_URL = "https://shuttle-live-proxy.WORKERS_SUBDOMAIN.workers.dev";
+const WORKER_URL = "https://shuttle-live-proxy.omeravr.workers.dev";
 const API_BASE = ["localhost", "127.0.0.1"].includes(location.hostname) ? "/api" : `${WORKER_URL}/api`;
 const ROUTE_DESCS = ["11861-1-0", "11861-2-0"];
 const REFRESH_MS = 20000;
