@@ -1,6 +1,8 @@
-# Shuttle 861 Live
+# Shuttle Live
 
-Live map of line 861, the free fast-lane shuttle between the Rishon LeZion park & ride and Tel Aviv: all buses on the route, your location, the nearest stop and when the next bus gets there.
+Live map of shuttle buses: all buses on the route, your location, the nearest stop and when the next bus gets there.
+
+Currently line 861, the free fast-lane shuttle between the Rishon LeZion park & ride and Tel Aviv.
 
 ## Data
 
