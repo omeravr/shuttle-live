@@ -10,6 +10,7 @@ const GPS_FRESH_MIN = 5;
 const GPS_LIVE_MIN = 2;
 const TZ = "Asia/Jerusalem";
 const WALK_MPS = 1.2;
+const NEAR_STOP_MAX_M = 2000;
 
 // --- travel-time model, measured from 121 real trips of line 861 on 2026-11-03 (Open Bus GPS) ---
 // Buses leave the lot on time: median 0.6 min after the scheduled start.
@@ -483,6 +484,7 @@ function displayPlace(bus) {
   return { ...place, lat: p.lat, lon: p.lon, s, heading: p.heading, estimated, offset };
 }
 
+// `far`: the rider isn't near the route, so the stop shouldn't be marked as "theirs"
 function nearestStop() {
   if (!state.me) return null;
   let best = null;
@@ -490,6 +492,7 @@ function nearestStop() {
     const d = haversine(state.me.lat, state.me.lon, s.lat, s.lon);
     if (!best || d < best.dist) best = { stop: s, index: i, dist: d };
   });
+  best.far = best.dist > NEAR_STOP_MAX_M;
   return best;
 }
 
@@ -583,7 +586,7 @@ function updateBusMarkers() {
 function render() {
   const { near, myIdx, target, closestId } = myStopAndTarget();
 
-  stopMarkers.forEach((m, i) => m.setIcon(stopIcon(i + 1, near && near.index === i)));
+  stopMarkers.forEach((m, i) => m.setIcon(stopIcon(i + 1, near && !near.far && near.index === i)));
   updateBusMarkers();
 
   renderFreshness();
@@ -627,7 +630,9 @@ function renderHero(near, myIdx, target) {
   const parts = [`לתחנה ${myStop.name}`];
   if (isStale()) parts.push(`לא עדכני, נתון אחרון מ-${fmtClock(new Date(state.fetchedAt))}`);
   else if (!target.tracked) parts.push("לפי לוח זמנים, האוטובוס עוד לא משדר");
-  if (near) {
+  if (near && near.far) {
+    parts.push(`את/ה ${fmtDist(near.dist)} מהתחנה הקרובה`);
+  } else if (near) {
     parts.push(`${fmtDist(near.dist)} ממך (~${Math.max(1, Math.round((near.dist * 1.3) / WALK_MPS / 60))} דק' הליכה)`);
   } else {
     parts.push(state.meSource === "denied" ? "אין גישה למיקום, לחץ על המפה לבחור מיקום" : "מאתר מיקום…");
@@ -640,7 +645,7 @@ function renderStops(near) {
   list.replaceChildren();
   STOPS.forEach((s, i) => {
     const li = document.createElement("li");
-    if (near && near.index === i) li.classList.add("nearest");
+    if (near && !near.far && near.index === i) li.classList.add("nearest");
 
     const dot = document.createElement("span");
     dot.className = "stop-dot";
@@ -656,7 +661,7 @@ function renderStops(near) {
     const next = stopNext(i);
     const bits = [];
     if (state.me) bits.push(`${fmtDist(haversine(state.me.lat, state.me.lon, s.lat, s.lon))} ממך`);
-    if (near && near.index === i) bits.push("הכי קרובה");
+    if (near && !near.far && near.index === i) bits.push("הכי קרובה");
     if (next) bits.push(next.tracked ? `~${next.clock}` : `${next.clock} · לו״ז`);
     sub.textContent = bits.join(" · ") || `תחנה ${s.code}`;
     main.append(name, sub);
@@ -666,10 +671,7 @@ function renderStops(near) {
     end.textContent = next ? fmtMin(next.minutes) : "—";
 
     li.append(dot, main, end);
-    li.addEventListener("click", () => {
-      map.flyTo([s.lat, s.lon], 17);
-      stopMarkers[i].openPopup();
-    });
+    li.addEventListener("click", () => flyToVisible([s.lat, s.lon], 17, () => stopMarkers[i].openPopup()));
     list.append(li);
   });
 }
@@ -720,7 +722,7 @@ function renderBuses(closestId, myIdx) {
     li.append(chip, main, end);
     li.addEventListener("click", () => {
       const p = displayPlace(b);
-      if (p) map.flyTo([p.lat, p.lon], 16);
+      if (p) flyToVisible([p.lat, p.lon], 16, () => busMarkers.get(b.id)?.openPopup());
     });
     list.append(li);
   }
@@ -784,6 +786,51 @@ function mapPadding() {
   if (sideSheet) return { paddingTopLeft: [40, 90], paddingBottomRight: [sheet.width + 40, 40] };
   return { paddingTopLeft: [40, 90], paddingBottomRight: [40, sheet.height + 40] };
 }
+
+// Center a point in the part of the map the panels don't cover, then run `then` (open its popup)
+function flyToVisible(latlng, zoom, then) {
+  const sheet = $("sheet");
+  if (sheet.classList.contains("expanded")) sheet.classList.remove("expanded");
+  // the sheet animates its height; measure the padding after it settles
+  setTimeout(() => {
+    map.flyToBounds([latlng, latlng], { ...mapPadding(), maxZoom: zoom, duration: 0.8 });
+    if (!then) return;
+    // registered after the fly starts, so a moveend left over from an earlier pan can't trigger
+    // it; the timer covers browsers that skip the animation (low power, background)
+    let done = false;
+    const run = () => {
+      if (done) return;
+      done = true;
+      then();
+    };
+    map.once("moveend", run);
+    setTimeout(run, 1100);
+  }, 260);
+}
+
+// Leaflet only keeps popups inside the map box; also keep them out from under our panels
+L.Popup.prototype.options.autoPan = false;
+map.on("popupopen", (e) => {
+  const el = e.popup.getElement();
+  if (!el) return;
+  const mapBox = map.getContainer().getBoundingClientRect();
+  const sheet = $("sheet").getBoundingClientRect();
+  const sideSheet = sheet.height > window.innerHeight * 0.6 && sheet.width < window.innerWidth * 0.6;
+  const free = {
+    top: mapBox.top + 80,
+    bottom: (sideSheet ? mapBox.bottom : sheet.top) - 16,
+    left: mapBox.left + 12,
+    right: (sideSheet ? sheet.left : mapBox.right) - 12,
+  };
+  const box = el.getBoundingClientRect();
+  let dx = 0;
+  let dy = 0;
+  if (box.top < free.top) dy = box.top - free.top;
+  else if (box.bottom > free.bottom) dy = box.bottom - free.bottom;
+  if (box.left < free.left) dx = box.left - free.left;
+  else if (box.right > free.right) dx = box.right - free.right;
+  if (dx || dy) map.panBy([dx, dy], { duration: 0.3 });
+});
 
 function fitToMe() {
   if (!state.me) return;
