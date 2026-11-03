@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>Shuttle 861 Live</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <div id="map"></div>
+
+    <header class="topbar">
+      <div class="badge">861</div>
+      <div class="topbar-text">
+        <p class="title">שאטל הנתיב המהיר · חזור לראשל"צ</p>
+        <p id="freshness" class="muted">טוען נתונים…</p>
+      </div>
+      <button id="refreshBtn" class="icon-btn" type="button" aria-label="רענון">⟳</button>
+    </header>
+
+    <button id="locateBtn" class="fab" type="button" aria-label="המיקום שלי">◎</button>
+
+    <section id="sheet" class="sheet">
+      <div class="handle" id="handle"></div>
+
+      <div id="hero" class="hero">
+        <p class="label">האוטובוס הקרוב אליך</p>
+        <p id="heroEta" class="hero-eta">—</p>
+        <p id="heroDetail" class="hero-detail muted">מאתר מיקום…</p>
+      </div>
+
+      <div class="section">
+        <h2>תחנות בתל אביב</h2>
+        <ol id="stopList" class="stop-list"></ol>
+      </div>
+
+      <div class="section">
+        <h2>אוטובוסים בדרך לתחנות <span id="busCount" class="count"></span></h2>
+        <ul id="busList" class="bus-list"></ul>
+      </div>
+
+      <p class="footnote muted">
+        זמני הגעה: חיזוי בזמן אמת של משרד התחבורה (<a href="https://route.bus.gov.il/" target="_blank" rel="noopener">route.bus.gov.il</a>).
+        מיקום על המפה: יוצא מה-GPS האחרון שהאוטובוס שידר (SIRI, דרך <a href="https://open-bus-stride-api.hasadna.org.il/docs" target="_blank" rel="noopener">Open Bus</a>) ומתקדם לאורך הכביש לפי זמן ההגעה של משרד התחבורה. בכל אוטובוס כתוב מתי ואיפה היה ה-GPS האמיתי האחרון.
+        "לו״ז" = לפי לוח זמנים, האוטובוס עוד לא משדר.
+      </p>
+    </section>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="./route.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>
