@@ -55,7 +55,7 @@ html, body { height: 100%; margin: 0; background: var(--bg); }
 .topbar-text p { margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .title { font-weight: 700; font-size: 14px; }
 #freshness { font-size: 12px; }
-#freshness.stale { color: var(--warn); }
+#freshness.stale { color: var(--warn); white-space: normal; }
 
 .icon-btn {
   flex: none;

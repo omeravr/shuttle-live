@@ -644,8 +644,23 @@ function renderFreshness() {
     return;
   }
   const parts = [`זמן אמת · ${fmtClock(new Date(state.fetchedAt), true)}`];
-  if (state.gpsError && !state.gps.size) parts.push("GPS לא זמין");
+  const lag = gpsSourceLagMin();
+  if (state.gpsError && !state.gps.size) {
+    parts.push("GPS לא זמין");
+    el.classList.add("stale");
+  } else if (state.buses.length && lag != null && lag > GPS_GUESS_MAX_MIN) {
+    // the whole GPS source is behind, not one bus: say so instead of looking like guesswork
+    parts.push(`מקור ה-GPS מתעכב ב-${Math.round(lag)} דק', זמנים לפי משרד התחבורה`);
+    el.classList.add("stale");
+  }
   el.textContent = parts.join(" · ");
+}
+
+// age of the newest fix from any bus on the line: how far behind the GPS feed itself is
+function gpsSourceLagMin() {
+  if (!state.gps.size) return null;
+  const newest = Math.max(...[...state.gps.values()].map((f) => f.at.getTime()));
+  return (Date.now() - newest) / 60000;
 }
 
 function renderHero(near, myIdx, target) {
