@@ -194,6 +194,7 @@ html, body { height: 100%; margin: 0; background: var(--bg); }
 }
 .bus-marker.closest { background: #e8710a; transform: scale(1.15); }
 .bus-marker { position: relative; }
+.bus-marker.approx { opacity: 0.55; border-style: dashed; }
 .bus-marker.live::after,
 .bus-marker.ping::after {
   content: "";

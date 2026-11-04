@@ -17,7 +17,7 @@ const NEAR_STOP_MAX_M = 2000;
 const DEPART_LATE_S = 36;
 // Median minutes from leaving the lot to stop 1, by scheduled start hour (Israel time).
 const HIGHWAY_MIN_BY_HOUR = {
-  5: 19.6, 6: 19.6, 7: 21.7, 8: 22.7, 9: 20.6, 10: 18.6, 11: 19.9, 12: 17.8, 13: 20.2, 14: 18.6,
+  5: 22, 6: 22, 7: 21.7, 8: 22.7, 9: 20.6, 10: 18.6, 11: 19.9, 12: 17.8, 13: 20.2, 14: 18.6,
   15: 20.8, 16: 20.3, 17: 25.9, 18: 25.3, 19: 19.4, 20: 16.4, 21: 16, 22: 16, 23: 16,
 };
 // Median seconds stop-to-stop in Tel Aviv, including the wait at the departing stop.
@@ -447,7 +447,13 @@ function busTruth(bus) {
   if (!fix) return "אין GPS מהאוטובוס, מיקום לפי לוח הזמנים וזמני נסיעה אמיתיים";
   const gps = `GPS ${fmtClock(fix.at)} ${placeName(fix.lat, fix.lon)} (${fmtAge(fix.ageMin)})`;
   if (place && !place.estimated) return fix.ageMin <= GPS_LIVE_MIN ? `מיקום חי · ${gps}` : gps;
+  if (place && onHighway(place)) return `מיקום משוער, בכביש המהיר אין GPS · ${gps}`;
   return `מיקום משוער · ${gps}`;
+}
+
+// between the lot and the first Tel Aviv stop buses send no GPS; travel time there varies by ±5 min
+function onHighway(place) {
+  return place.s > 400 && place.s < STOPS[0].s - 300;
 }
 
 // The model moves when data changes. Between GPS fixes the bus never drives backward on screen (it
@@ -471,14 +477,15 @@ function displayPlace(bus) {
   const dt = Math.min(5, Math.max(0, (Date.now() - prev.t) / 1000));
   let offset = prev.version === dataVersion ? prev.offset : prev.s - place.s;
   let correcting = prev.correcting;
-  if (fixAt > prev.fixAt && prev.s - place.s > CORRECT_BACK_MIN_M) {
-    // a long way back reads better as "position updated" (with the GPS pulse) than as a bus reversing
-    if (prev.s - place.s > CORRECT_BACK_JUMP_M) return { ...place, offset: 0, correcting: false };
+  if (fixAt > prev.fixAt && Math.abs(prev.s - place.s) > CORRECT_BACK_MIN_M) {
+    // a long correction reads better as "position updated" (with the GPS pulse) than as the bus
+    // racing or reversing down the road
+    if (Math.abs(prev.s - place.s) > CORRECT_BACK_JUMP_M) return { ...place, offset: 0, correcting: false };
     correcting = true;
   }
 
-  // fade the gap out; forward catch-up is gentle, a GPS correction back is quicker
-  const cap = correcting && offset > 0 ? CORRECT_BACK_MAX_MPS : CATCHUP_MAX_MPS;
+  // fade the gap out; drifting forward is gentle, a correction from a new GPS fix is quicker
+  const cap = correcting ? CORRECT_BACK_MAX_MPS : CATCHUP_MAX_MPS;
   const faded = offset * Math.exp(-dt / CATCHUP_TAU_S);
   const step = Math.min(Math.abs(offset - faded), cap * dt);
   offset -= Math.sign(offset) * step;
@@ -566,7 +573,11 @@ function updateBusMarkers() {
     });
     const isLive = place.fix && place.fix.ageMin <= GPS_LIVE_MIN && !place.estimated;
     const pinged = Date.now() - (newFixAt.get(b.id) || 0) < 2500;
-    const classes = [b.id === closestId ? "closest" : "", isLive ? "live" : "", pinged ? "ping" : ""].join(" ").trim();
+    // no recent GPS behind this position (typically on the highway): draw it as clearly approximate
+    const approx = place.estimated && (!place.fix || place.fix.ageMin > GPS_FRESH_MIN);
+    const classes = [b.id === closestId ? "closest" : "", isLive ? "live" : "", pinged ? "ping" : "", approx ? "approx" : ""]
+      .join(" ")
+      .trim();
     const iconKey = `${classes}|${Math.round((place.heading ?? -1) / 10)}`;
     let m = busMarkers.get(b.id);
     if (!m) {
@@ -640,6 +651,12 @@ function renderHero(near, myIdx, target) {
   const parts = [`לתחנה ${myStop.name}`];
   if (isStale()) parts.push(`לא עדכני, נתון אחרון מ-${fmtClock(new Date(state.fetchedAt))}`);
   else if (!target.tracked) parts.push("לפי לוח זמנים, האוטובוס עוד לא משדר");
+  else {
+    const bus = state.buses.find((b) => b.id === target.trip);
+    const place = bus && displayPlace(bus);
+    const waiting = place && place.departsIn > 0;
+    if (place && (onHighway(place) || waiting)) parts.push("הערכה, בכביש המהיר אין GPS (±כמה דק')");
+  }
   if (near && near.far) {
     parts.push(`את/ה ${fmtDist(near.dist)} מהתחנה הקרובה`);
   } else if (near) {
