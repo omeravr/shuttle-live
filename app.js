@@ -8,6 +8,7 @@ const ROUTE_DESCS = ["11861-1-0", "11861-2-0"];
 const REFRESH_MS = 20000;
 const GPS_FRESH_MIN = 5;
 const GPS_LIVE_MIN = 2;
+const GPS_GUESS_MAX_MIN = 5;
 const TZ = "Asia/Jerusalem";
 const WALK_MPS = 1.2;
 const NEAR_STOP_MAX_M = 2000;
@@ -380,19 +381,32 @@ function busModel(bus) {
     anchor = "mot";
   }
 
+  // Never guess further than GPS_GUESS_MAX_MIN past the last real fix (enough to cover the ~2 min
+  // it takes a fix to reach us). After that the bus stays put, marked stale, until a new fix.
+  const lastReal = fix ? fix.at.getTime() : t0;
+  const stale = !fix || fix.ageMin > GPS_GUESS_MAX_MIN;
+  const until = Math.min(now, Math.max(t0, lastReal + GPS_GUESS_MAX_MIN * 60000));
   const raw = tau0 + (now - t0) / 1000;
-  const t = Math.max(0, raw);
+  const t = Math.max(0, tau0 + (until - t0) / 1000);
   const s = sAtTau(t, tau);
   const p = pointAt(s);
-  const nextIdx = tau.findIndex((x) => x > t);
   const estimated = !fix || haversine(p.lat, p.lon, fix.lat, fix.lon) > 40;
+
+  // with no recent GPS, which stop is next and when come from MOT, not from our guess
+  const motEta = (i) => {
+    const m = bus.etas.get(String(STOPS[i].code));
+    return m == null ? null : Math.max(0, m - (now - state.fetchedAt) / 60000);
+  };
+  const nextIdx = stale
+    ? STOPS.findIndex((_, i) => (motEta(i) ?? -1) > 0)
+    : tau.findIndex((x) => x > Math.max(0, raw));
   return {
-    lat: p.lat, lon: p.lon, s, heading: s > 0 ? p.heading : undefined, fix, fixS, anchor, estimated,
+    lat: p.lat, lon: p.lon, s, heading: s > 0 ? p.heading : undefined, fix, fixS, anchor, estimated, stale,
     departsIn: raw < 0 ? -raw / 60 : 0,
     nextIdx,
-    done: nextIdx < 0 && t > tau[tau.length - 1] + 60,
+    done: !stale && nextIdx < 0 && raw > tau[tau.length - 1] + 60,
     // minutes until it reaches stop i, null once it's there or past it
-    etaTo: (i) => (tau[i] > t - 5 ? Math.max(0, (tau[i] - t) / 60) : null),
+    etaTo: (i) => (stale ? motEta(i) : tau[i] > raw - 5 ? Math.max(0, (tau[i] - Math.max(0, raw)) / 60) : null),
   };
 }
 
@@ -425,8 +439,8 @@ function stopNext(stopIdx) {
 function busLabel(bus) {
   const m = busModel(bus);
   if (!m) return "בדרך";
-  if (m.departsIn > 0.5) return `בחניון ראשל"צ, יוצא בעוד ~${Math.round(m.departsIn)} דק'`;
-  if (m.nextIdx < 0) return "סיים בת״א";
+  if (m.departsIn > 0.5 && !m.stale) return `בחניון ראשל"צ, יוצא בעוד ~${Math.round(m.departsIn)} דק'`;
+  if (m.nextIdx < 0) return m.stale ? "אין GPS, לא ידוע איפה" : "סיים בת״א";
   if (m.nextIdx === 0) return "בדרך לת״א";
   return `בדרך ל${STOPS[m.nextIdx].name}`;
 }
@@ -444,8 +458,9 @@ function placeName(lat, lon) {
 function busTruth(bus) {
   const place = displayPlace(bus);
   const fix = busFix(bus);
-  if (!fix) return "אין GPS מהאוטובוס, מיקום לפי לוח הזמנים וזמני נסיעה אמיתיים";
+  if (!fix) return "אין GPS מהאוטובוס · זמנים לפי משרד התחבורה";
   const gps = `GPS ${fmtClock(fix.at)} ${placeName(fix.lat, fix.lon)} (${fmtAge(fix.ageMin)})`;
+  if (place && place.stale) return `אין GPS כבר ${Math.round(fix.ageMin)} דק' · מיקום אחרון ידוע ${placeName(fix.lat, fix.lon)} · זמנים לפי משרד התחבורה`;
   if (place && !place.estimated) return fix.ageMin <= GPS_LIVE_MIN ? `מיקום חי · ${gps}` : gps;
   if (place && onHighway(place)) return `מיקום משוער, בכביש המהיר אין GPS · ${gps}`;
   return `מיקום משוער · ${gps}`;
@@ -574,7 +589,7 @@ function updateBusMarkers() {
     const isLive = place.fix && place.fix.ageMin <= GPS_LIVE_MIN && !place.estimated;
     const pinged = Date.now() - (newFixAt.get(b.id) || 0) < 2500;
     // no recent GPS behind this position (typically on the highway): draw it as clearly approximate
-    const approx = place.estimated && (!place.fix || place.fix.ageMin > GPS_FRESH_MIN);
+    const approx = place.stale || (place.estimated && onHighway(place));
     const classes = [b.id === closestId ? "closest" : "", isLive ? "live" : "", pinged ? "ping" : "", approx ? "approx" : ""]
       .join(" ")
       .trim();
@@ -655,7 +670,8 @@ function renderHero(near, myIdx, target) {
     const bus = state.buses.find((b) => b.id === target.trip);
     const place = bus && displayPlace(bus);
     const waiting = place && place.departsIn > 0;
-    if (place && (onHighway(place) || waiting)) parts.push("הערכה, בכביש המהיר אין GPS (±כמה דק')");
+    if (place && place.stale) parts.push("אין GPS מהאוטובוס, הזמן לפי משרד התחבורה");
+    else if (place && (onHighway(place) || waiting)) parts.push("הערכה, בכביש המהיר אין GPS (±כמה דק')");
   }
   if (near && near.far) {
     parts.push(`את/ה ${fmtDist(near.dist)} מהתחנה הקרובה`);
