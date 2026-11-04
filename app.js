@@ -10,7 +10,8 @@ const GPS_FRESH_MIN = 5;
 const GPS_LIVE_MIN = 2;
 const GPS_GUESS_MAX_MIN = 5;
 const MOT_MOVE_M = 30;
-const MOT_FIRST_SEEN_AGE_MS = 60000;
+const MOT_REPORT_DELAY_MS = 60000;
+const MOT_FIRST_SEEN_AGE_MS = 90000;
 const SOURCE_LAG_WARN_MIN = 8;
 const TZ = "Asia/Jerusalem";
 const WALK_MPS = 1.2;
@@ -358,7 +359,9 @@ function trackMotFix(trip, loc, now) {
   if (prev && haversine(prev.lat, prev.lon, loc.lat, loc.lon) < MOT_MOVE_M) return;
   let at;
   if (prev) {
-    at = new Date(now);
+    // MOT shows a new location a median 62 s after the bus reported it (matched to Open Bus fixes,
+    // which carry the real time), so it was recorded about a minute before we noticed it
+    at = new Date(now - MOT_REPORT_DELAY_MS);
     newFixAt.set(trip, now);
   } else {
     // first time we see this trip, so we don't know when it was reported. Open Bus may know; a
