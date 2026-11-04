@@ -17,14 +17,15 @@ const NEAR_STOP_MAX_M = 2000;
 const DEPART_LATE_S = 36;
 // Median minutes from leaving the lot to stop 1, by scheduled start hour (Israel time).
 const HIGHWAY_MIN_BY_HOUR = {
-  5: 18, 6: 18, 7: 21.7, 8: 22.7, 9: 20.6, 10: 18.6, 11: 19.9, 12: 17.8, 13: 20.2, 14: 18.6,
+  5: 19.6, 6: 19.6, 7: 21.7, 8: 22.7, 9: 20.6, 10: 18.6, 11: 19.9, 12: 17.8, 13: 20.2, 14: 18.6,
   15: 20.8, 16: 20.3, 17: 25.9, 18: 25.3, 19: 19.4, 20: 16.4, 21: 16, 22: 16, 23: 16,
 };
 // Median seconds stop-to-stop in Tel Aviv, including the wait at the departing stop.
 const CITY_LEG_S = [228, 96, 108, 84, 222, 72];
 // Tel Aviv part (stop 1 -> 7) by hour, relative to the all-day median of 13.8 min.
 const CITY_FACTOR_BY_HOUR = {
-  5: 0.8, 6: 0.8, 7: 0.87, 8: 1.09, 9: 0.94, 10: 0.82, 11: 0.91, 12: 0.97, 13: 0.93, 14: 1.14,
+  // 06:xx departures reach Tel Aviv in the 07:00 rush
+  5: 0.87, 6: 0.87, 7: 0.87, 8: 1.09, 9: 0.94, 10: 0.82, 11: 0.91, 12: 0.97, 13: 0.93, 14: 1.14,
   15: 0.96, 16: 1.1, 17: 1.09, 18: 1.08, 19: 0.99, 20: 0.87, 21: 0.81, 22: 0.81, 23: 0.81,
 };
 // Seconds from the scheduled start to each stop in the official timetable (GTFS).
@@ -449,12 +450,15 @@ function busTruth(bus) {
   return `מיקום משוער · ${gps}`;
 }
 
-// The model moves when data changes. On screen the bus never drives backward (it holds until the
-// target catches up) and closes forward gaps gradually instead of teleporting.
+// The model moves when data changes. Between GPS fixes the bus never drives backward on screen (it
+// holds until the target catches up) and closes forward gaps gradually instead of teleporting.
+// A new GPS fix is real evidence: the model re-anchors on it (projected forward to now), so if that
+// puts the bus behind the marker, the marker glides back to it rather than staying wrong.
 const CATCHUP_TAU_S = 3;
 const CATCHUP_MAX_MPS = 20;
-const MAX_CATCHUP_M = 800;
-const FRESH_SNAP_MIN = 1;
+const CORRECT_BACK_MIN_M = 150;
+const CORRECT_BACK_MAX_MPS = 150;
+const CORRECT_BACK_JUMP_M = 600;
 const SNAP_M = 4000;
 const shown = new Map();
 function displayPlace(bus) {
@@ -462,26 +466,31 @@ function displayPlace(bus) {
   if (!place) return null;
   const fixAt = place.fix ? place.fix.at.getTime() : 0;
   const prev = shown.get(bus.id);
-  if (!prev) return { ...place, offset: 0 };
-  // Fixes usually arrive minutes late, so one behind the marker says where the bus was, not where
-  // it is. Only a fresh fix that disagrees a lot may pull the bus back.
-  const fixFresh = place.fix && place.fix.ageMin <= FRESH_SNAP_MIN;
-  if (fixAt > prev.fixAt && fixFresh && prev.s - place.s > MAX_CATCHUP_M) return { ...place, offset: 0 };
+  if (!prev) return { ...place, offset: 0, correcting: false };
 
   const dt = Math.min(5, Math.max(0, (Date.now() - prev.t) / 1000));
   let offset = prev.version === dataVersion ? prev.offset : prev.s - place.s;
-  // fade the correction out, but never faster than CATCHUP_MAX_MPS on top of normal driving
+  let correcting = prev.correcting;
+  if (fixAt > prev.fixAt && prev.s - place.s > CORRECT_BACK_MIN_M) {
+    // a long way back reads better as "position updated" (with the GPS pulse) than as a bus reversing
+    if (prev.s - place.s > CORRECT_BACK_JUMP_M) return { ...place, offset: 0, correcting: false };
+    correcting = true;
+  }
+
+  // fade the gap out; forward catch-up is gentle, a GPS correction back is quicker
+  const cap = correcting && offset > 0 ? CORRECT_BACK_MAX_MPS : CATCHUP_MAX_MPS;
   const faded = offset * Math.exp(-dt / CATCHUP_TAU_S);
-  const step = Math.min(Math.abs(offset - faded), CATCHUP_MAX_MPS * dt);
+  const step = Math.min(Math.abs(offset - faded), cap * dt);
   offset -= Math.sign(offset) * step;
   if (Math.abs(offset) < 2 || offset < -SNAP_M) offset = 0;
-  // never drive backward on screen: hold until the target catches up
-  const s = Math.max(prev.s, place.s + offset);
+  if (offset === 0) correcting = false;
+  // without new GPS evidence, never drive backward on screen: hold until the target catches up
+  const s = correcting ? place.s + offset : Math.max(prev.s, place.s + offset);
   offset = s - place.s;
-  if (offset === 0) return { ...place, offset };
+  if (offset === 0) return { ...place, offset, correcting };
   const p = pointAt(s);
   const estimated = !place.fix || haversine(p.lat, p.lon, place.fix.lat, place.fix.lon) > 40;
-  return { ...place, lat: p.lat, lon: p.lon, s, heading: p.heading, estimated, offset };
+  return { ...place, lat: p.lat, lon: p.lon, s, heading: p.heading, estimated, offset, correcting };
 }
 
 // `far`: the rider isn't near the route, so the stop shouldn't be marked as "theirs"
@@ -550,6 +559,7 @@ function updateBusMarkers() {
     shown.set(b.id, {
       s: place.s,
       offset: place.offset,
+      correcting: place.correcting,
       version: dataVersion,
       fixAt: place.fix ? place.fix.at.getTime() : 0,
       t: Date.now(),
