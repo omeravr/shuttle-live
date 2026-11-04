@@ -127,7 +127,9 @@ const tick = () => {
     const last = h[h.length - 1];
     if (last) {
       const ds = sh.s - last.s;
-      const newFix = (lastFixAt.get(b.id) || 0) > last.t;
+      // a new fix from either source: Open Bus (seen here) or MOT's live location (the app's newFixAt)
+      const appFix = run(`newFixAt.get(${b.id}) || 0`);
+      const newFix = Math.max(lastFixAt.get(b.id) || 0, appFix) > last.t - 20000;
       if (ds < -1) newFix ? backwardAfterFix++ : backward++;
       if (ds > 60 * ((simNow - last.t) / 1000 || 1) && !newFix) lurches++;
     }

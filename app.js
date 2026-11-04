@@ -9,6 +9,9 @@ const REFRESH_MS = 20000;
 const GPS_FRESH_MIN = 5;
 const GPS_LIVE_MIN = 2;
 const GPS_GUESS_MAX_MIN = 5;
+const MOT_MOVE_M = 30;
+const MOT_FIRST_SEEN_AGE_MS = 60000;
+const SOURCE_LAG_WARN_MIN = 8;
 const TZ = "Asia/Jerusalem";
 const WALK_MPS = 1.2;
 const NEAR_STOP_MAX_M = 2000;
@@ -306,6 +309,8 @@ function ingest(results) {
         if (a.realtime && a.trip != null) {
           const bus = trips.get(a.trip) || { id: a.trip, etas: new Map(), schedStart: null };
           bus.etas.set(code, a.minutes);
+          const loc = t.routeLocation;
+          if (loc && Number.isFinite(loc.lat) && Number.isFinite(loc.lng)) bus.motLoc = { lat: loc.lat, lon: loc.lng };
           // the timetable start of this trip, from any stop's static time
           const st = parseIsraelTime(t.staticArrivalTime);
           if (!bus.schedStart && Number.isFinite(st) && STATIC_OFFSET_S[code] != null) {
@@ -318,9 +323,11 @@ function ingest(results) {
   }
   for (const list of arrivals.values()) list.sort((x, y) => x.minutes - y.minutes);
 
+  const now = Date.now();
+  for (const b of trips.values()) if (b.motLoc) trackMotFix(b.id, b.motLoc, now);
+
   // MOT sometimes drops a trip for a single update; keep it briefly so its marker doesn't
   // vanish and reappear
-  const now = Date.now();
   for (const b of trips.values()) b.seenAt = now;
   for (const old of state.buses) {
     if (!trips.has(old.id) && now - old.seenAt < MISSING_GRACE_MS) trips.set(old.id, old);
@@ -343,8 +350,32 @@ function ingestGps(body) {
   state.gps = gps;
 }
 
+// MOT's own live location for each trip (routeLocation in the arrivals feed). It is the bus's last
+// reported GPS, minutes fresher than Open Bus, but has no timestamp: we time it by when it changed.
+const motFixes = new Map();
+function trackMotFix(trip, loc, now) {
+  const prev = motFixes.get(trip);
+  if (prev && haversine(prev.lat, prev.lon, loc.lat, loc.lon) < MOT_MOVE_M) return;
+  let at;
+  if (prev) {
+    at = new Date(now);
+    newFixAt.set(trip, now);
+  } else {
+    // first time we see this trip, so we don't know when it was reported. Open Bus may know; a
+    // bus seen at the lot may have left long ago, so that one can't anchor time
+    const ob = state.gps.get(trip);
+    if (ob && haversine(ob.lat, ob.lon, loc.lat, loc.lon) < MOT_MOVE_M) at = ob.at;
+    else if (haversine(loc.lat, loc.lon, HUB.lat, HUB.lon) < 400) at = null;
+    else at = new Date(now - MOT_FIRST_SEEN_AGE_MS);
+  }
+  motFixes.set(trip, { lat: loc.lat, lon: loc.lon, at, velocity: null, source: "mot" });
+}
+
+// the freshest real position we have for the trip, from MOT or Open Bus
 function busFix(bus) {
-  const fix = state.gps.get(bus.id);
+  const ob = state.gps.get(bus.id);
+  const mot = motFixes.get(bus.id);
+  const fix = mot && mot.at && (!ob || mot.at > ob.at) ? mot : ob;
   if (!fix) return null;
   const ageMin = (Date.now() - fix.at) / 60000;
   return { ...fix, ageMin, fresh: ageMin <= GPS_FRESH_MIN };
@@ -645,22 +676,21 @@ function renderFreshness() {
   }
   const parts = [`זמן אמת · ${fmtClock(new Date(state.fetchedAt), true)}`];
   const lag = gpsSourceLagMin();
-  if (state.gpsError && !state.gps.size) {
-    parts.push("GPS לא זמין");
-    el.classList.add("stale");
-  } else if (state.buses.length && lag != null && lag > GPS_GUESS_MAX_MIN) {
-    // the whole GPS source is behind, not one bus: say so instead of looking like guesswork
-    parts.push(`מקור ה-GPS מתעכב ב-${Math.round(lag)} דק', זמנים לפי משרד התחבורה`);
+  if (lag != null && lag > SOURCE_LAG_WARN_MIN) {
+    // the GPS feed itself is behind, not one bus: say so instead of looking like guesswork
+    parts.push(`ה-GPS מתעכב ב-${Math.round(lag)} דק', זמנים לפי משרד התחבורה`);
     el.classList.add("stale");
   }
   el.textContent = parts.join(" · ");
 }
 
-// age of the newest fix from any bus on the line: how far behind the GPS feed itself is
+// Buses only report in Tel Aviv, so judge the feed by buses MOT places there: if even the freshest
+// of them is old, the feed is behind. null when no bus should be reporting.
 function gpsSourceLagMin() {
-  if (!state.gps.size) return null;
-  const newest = Math.max(...[...state.gps.values()].map((f) => f.at.getTime()));
-  return (Date.now() - newest) / 60000;
+  const inCity = state.buses.filter((b) => STOPS.slice(1).some((s) => b.etas.has(String(s.code))) && !b.etas.has(String(STOPS[0].code)));
+  if (!inCity.length) return null;
+  const ages = inCity.map((b) => busFix(b)?.ageMin ?? Infinity);
+  return Math.min(...ages);
 }
 
 function renderHero(near, myIdx, target) {
