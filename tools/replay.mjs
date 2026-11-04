@@ -206,6 +206,8 @@ const stats = (xs) => {
     p90Abs_s: Math.round(q(abs, 0.9)),
     within1min: `${Math.round((100 * abs.filter((x) => x <= 60).length) / abs.length)}%`,
     within2min: `${Math.round((100 * abs.filter((x) => x <= 120).length) / abs.length)}%`,
+    // shown time later than the real arrival by over a minute: a rider trusting it misses the bus
+    tooLate1min: `${Math.round((100 * a.filter((x) => x > 60).length) / a.length)}%`,
   };
 };
 const result = { horizons: {}, dangerous: 0, dangerousOf: 0 };
