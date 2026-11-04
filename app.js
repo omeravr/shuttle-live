@@ -426,21 +426,16 @@ function busModel(bus) {
   const p = pointAt(s);
   const estimated = !fix || haversine(p.lat, p.lon, fix.lat, fix.lon) > 40;
 
-  // with no recent GPS, which stop is next and when come from MOT, not from our guess
-  const motEta = (i) => {
-    const m = bus.etas.get(String(STOPS[i].code));
-    return m == null ? null : Math.max(0, m - (now - state.fetchedAt) / 60000);
-  };
-  const nextIdx = stale
-    ? STOPS.findIndex((_, i) => (motEta(i) ?? -1) > 0)
-    : tau.findIndex((x) => x > Math.max(0, raw));
+  const nextIdx = tau.findIndex((x) => x > Math.max(0, raw));
   return {
     lat: p.lat, lon: p.lon, s, heading: s > 0 ? p.heading : undefined, fix, fixS, anchor, estimated, stale,
     departsIn: raw < 0 ? -raw / 60 : 0,
     nextIdx,
     done: !stale && nextIdx < 0 && raw > tau[tau.length - 1] + 60,
-    // minutes until it reaches stop i, null once it's there or past it
-    etaTo: (i) => (stale ? motEta(i) : tau[i] > raw - 5 ? Math.max(0, (tau[i] - Math.max(0, raw)) / 60) : null),
+    // minutes until it reaches stop i, null once it's there or past it. Times always come from the
+    // travel-time model, even when the map position is frozen: replayed on 2026-11-04 it was within
+    // 2 min 70-94% of the time for buses without GPS, MOT 23-33%
+    etaTo: (i) => (tau[i] > raw - 5 ? Math.max(0, (tau[i] - Math.max(0, raw)) / 60) : null),
   };
 }
 
@@ -492,9 +487,9 @@ function placeName(lat, lon) {
 function busTruth(bus) {
   const place = displayPlace(bus);
   const fix = busFix(bus);
-  if (!fix) return "אין GPS מהאוטובוס · זמנים לפי משרד התחבורה";
+  if (!fix) return "אין GPS מהאוטובוס · זמן לפי לוח הזמנים וזמני הנסיעה של הקו";
   const gps = `GPS ${fmtClock(fix.at)} ${placeName(fix.lat, fix.lon)} (${fmtAge(fix.ageMin)})`;
-  if (place && place.stale) return `אין GPS כבר ${Math.round(fix.ageMin)} דק' · מיקום אחרון ידוע ${placeName(fix.lat, fix.lon)} · זמנים לפי משרד התחבורה`;
+  if (place && place.stale) return `אין GPS כבר ${Math.round(fix.ageMin)} דק' · מיקום אחרון ידוע ${placeName(fix.lat, fix.lon)} · זמן לפי זמני הנסיעה של הקו`;
   if (place && !place.estimated) return fix.ageMin <= GPS_LIVE_MIN ? `מיקום חי · ${gps}` : gps;
   if (place && onHighway(place)) return `מיקום משוער, בכביש המהיר אין GPS · ${gps}`;
   return `מיקום משוער · ${gps}`;
@@ -681,7 +676,7 @@ function renderFreshness() {
   const lag = gpsSourceLagMin();
   if (lag != null && lag > SOURCE_LAG_WARN_MIN) {
     // the GPS feed itself is behind, not one bus: say so instead of looking like guesswork
-    parts.push(`ה-GPS מתעכב ב-${Math.round(lag)} דק', זמנים לפי משרד התחבורה`);
+    parts.push(`ה-GPS מתעכב ב-${Math.round(lag)} דק', זמנים לפי זמני הנסיעה של הקו`);
     el.classList.add("stale");
   }
   el.textContent = parts.join(" · ");
@@ -718,7 +713,7 @@ function renderHero(near, myIdx, target) {
     const bus = state.buses.find((b) => b.id === target.trip);
     const place = bus && displayPlace(bus);
     const waiting = place && place.departsIn > 0;
-    if (place && place.stale) parts.push("אין GPS מהאוטובוס, הזמן לפי משרד התחבורה");
+    if (place && place.stale) parts.push("אין GPS מהאוטובוס, הזמן לפי זמני הנסיעה של הקו (±2 דק')");
     else if (place && (onHighway(place) || waiting)) parts.push("הערכה, בכביש המהיר אין GPS (±כמה דק')");
   }
   if (near && near.far) {

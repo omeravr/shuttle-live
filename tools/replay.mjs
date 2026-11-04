@@ -81,7 +81,9 @@ const sandbox = {
   clearInterval: () => {},
 };
 vm.createContext(sandbox);
-for (const f of ["route.js", "app.js"]) vm.runInContext(fs.readFileSync(path.join(ROOT, f), "utf8"), sandbox, { filename: f });
+// --app lets an experiment be scored against the same day without touching the live app.js
+const appFile = opt("--app") || path.join(ROOT, "app.js");
+for (const f of [path.join(ROOT, "route.js"), appFile]) vm.runInContext(fs.readFileSync(f, "utf8"), sandbox, { filename: f });
 const run = (code) => vm.runInContext(code, sandbox);
 const STOPS = run("STOPS");
 
