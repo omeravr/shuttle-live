@@ -23,7 +23,7 @@ const DEPART_LATE_S = 36;
 // Median minutes from leaving the lot to stop 1, by scheduled start hour (Israel time).
 const HIGHWAY_MIN_BY_HOUR = {
   5: 22, 6: 22, 7: 21.7, 8: 22.7, 9: 20.6, 10: 18.6, 11: 19.9, 12: 17.8, 13: 20.2, 14: 18.6,
-  15: 20.8, 16: 20.3, 17: 25.9, 18: 25.3, 19: 19.4, 20: 16.4, 21: 16, 22: 16, 23: 16,
+  15: 21.3, 16: 23.5, 17: 25.9, 18: 25.3, 19: 19.4, 20: 16.4, 21: 16, 22: 16, 23: 16,
 };
 // Median seconds stop-to-stop in Tel Aviv, including the wait at the departing stop.
 const CITY_LEG_S = [228, 96, 108, 84, 222, 72];
